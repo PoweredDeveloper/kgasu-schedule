@@ -29,7 +29,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         await message.answer(
             T.home_html(canon, has_schedule_file=has),
             parse_mode="HTML",
-            reply_markup=home_kb(has_schedule_file=has),
+            reply_markup=home_kb(group=canon),
         )
         return
 

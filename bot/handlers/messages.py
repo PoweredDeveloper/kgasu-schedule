@@ -22,7 +22,7 @@ async def _send_home(message: Message, state: FSMContext, canon: str) -> None:
     await message.answer(
         T.home_html(canon, has_schedule_file=has),
         parse_mode="HTML",
-        reply_markup=home_kb(has_schedule_file=has),
+        reply_markup=home_kb(group=canon),
     )
 
 

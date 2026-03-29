@@ -62,6 +62,33 @@ def test_format_lesson_line_html_escapes() -> None:
     assert "A&amp;B" in line
 
 
+def test_pe_subject_strips_inline_teachers() -> None:
+    subj = (
+        "Элективные курсы по физической культуре и спорту (Практические) СК «Тезуче» "
+        "доц. Калманович В.Л., доц. Архипов Е.Ю."
+    )
+    line = schedule_service.format_lesson_line_html(
+        {"time": "9:40-11:10", "subject": subj, "room": "", "teacher": ""}
+    )
+    assert "Калманович" not in line
+    assert "Архипов" not in line
+    assert "Тезуче" in line
+    assert "физической культуре" in line
+
+
+def test_non_pe_subject_keeps_inline_teachers() -> None:
+    subj = "Математический анализ доц. Иванов И.И."
+    line = schedule_service.format_lesson_line_html(
+        {"time": "10:00-11:30", "subject": subj, "room": "", "teacher": ""}
+    )
+    assert "Иванов" in line
+
+
+def test_physical_chemistry_not_treated_as_pe() -> None:
+    subj = "Физическая химия доц. Петров П.П."
+    assert schedule_service.display_subject(subj) == subj
+
+
 def test_lessons_for_calendar_week_filters_by_parity() -> None:
     lessons = [
         {"time": "1", "subject": "Even only", "week_parity": "even"},

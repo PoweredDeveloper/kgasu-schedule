@@ -114,7 +114,7 @@ async def cb_pick(query: CallbackQuery, state: FSMContext) -> None:
     await _edit(
         query,
         T.home_html(name, has_schedule_file=has),
-        home_kb(has_schedule_file=has),
+        home_kb(group=name),
     )
 
 
@@ -145,7 +145,7 @@ async def cb_back_home(query: CallbackQuery, state: FSMContext) -> None:
     await _edit(
         query,
         T.home_html(group, has_schedule_file=has),
-        home_kb(has_schedule_file=has),
+        home_kb(group=group),
     )
 
 
@@ -169,13 +169,12 @@ async def cb_full_file(query: CallbackQuery, state: FSMContext) -> None:
         await query.answer(T.UNKNOWN_GROUP, show_alert=True)
         return
     await query.answer()
-    has = schedule_service.group_has_schedule_file(group)
     body, err = await schedule_service.build_full_schedule_txt_async(group)
     if err is None and body:
         fn = f"raspisanie_{_safe_filename(group)}.txt"
         await query.message.answer_document(
             BufferedInputFile(body.encode("utf-8"), filename=fn),
-            caption="<b>Вот целиком</b> <i>(с сайта, текущая чётность недели)</i>",
+            caption="<b>Вся неделя</b> <i>(с сайта, текущая чётность недели)</i>",
             parse_mode="HTML",
         )
     else:
@@ -206,7 +205,7 @@ async def cb_full_file(query: CallbackQuery, state: FSMContext) -> None:
     await query.message.answer(
         "<i>Что дальше?</i>",
         parse_mode="HTML",
-        reply_markup=home_kb(has_schedule_file=has),
+        reply_markup=home_kb(group=group),
     )
 
 
@@ -235,11 +234,10 @@ async def cb_today(query: CallbackQuery, state: FSMContext) -> None:
         lines = [f"<b>{title}</b>", ""] + [format_lesson_line_html(x) for x in lessons]
         body = "\n".join(lines)
     await query.message.answer(body, parse_mode="HTML")
-    has = schedule_service.group_has_schedule_file(group)
     await query.message.answer(
         "<i>Назад к кнопкам 👇</i>",
         parse_mode="HTML",
-        reply_markup=home_kb(has_schedule_file=has),
+        reply_markup=home_kb(group=group),
     )
 
 
@@ -267,9 +265,8 @@ async def cb_tomorrow(query: CallbackQuery, state: FSMContext) -> None:
         lines = [f"<b>{title}</b>", ""] + [format_lesson_line_html(x) for x in lessons]
         body = "\n".join(lines)
     await query.message.answer(body, parse_mode="HTML")
-    has = schedule_service.group_has_schedule_file(group)
     await query.message.answer(
         "<i>Назад к кнопкам 👇</i>",
         parse_mode="HTML",
-        reply_markup=home_kb(has_schedule_file=has),
+        reply_markup=home_kb(group=group),
     )

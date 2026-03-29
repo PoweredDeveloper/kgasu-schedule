@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import bot.texts as T
 import config
+from bot.services import schedule_service
 
 
 def onboarding_kb() -> InlineKeyboardMarkup:
@@ -40,12 +41,15 @@ def group_pagination(groups: list[str], page: int) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def home_kb(*, has_schedule_file: bool) -> InlineKeyboardMarkup:
+def home_kb(*, group: str) -> InlineKeyboardMarkup:
+    doc_url = schedule_service.get_doc_url(group)
+    has = doc_url is not None
     b = InlineKeyboardBuilder()
-    b.button(text=T.BTN_FULL_FILE, callback_data="k:fl")
-    if has_schedule_file:
+    if has:
+        b.row(InlineKeyboardButton(text=T.BTN_FULL_FILE, url=doc_url))
         b.button(text=T.BTN_TODAY, callback_data="k:td")
         b.button(text=T.BTN_TOMORROW, callback_data="k:tmr")
+        b.button(text=T.BTN_WHOLE_WEEK, callback_data="k:fl")
     b.button(text=T.BTN_MENU, callback_data="k:smn")
     b.button(text=T.BTN_CHANGE_GROUP, callback_data="k:cg")
     b.adjust(1)

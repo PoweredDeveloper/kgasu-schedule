@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import threading
 import unicodedata
 from html import escape as esc_html
@@ -22,6 +23,44 @@ WEEKDAYS = [
     "Saturday",
     "Sunday",
 ]
+
+# Inline teacher lists in KGASU subject cells (доц. …, ст. преп. …) — strip for PE/sport only.
+_RE_INLINE_TEACHER_START = re.compile(
+    r"[\s,\-]+(?:"
+    r"ст\.\s*преп\.|ст\.преп\.|"
+    r"доц\.|проф\.|преп\.|ассист\."
+    r")\s+[А-ЯЁA-Za-z]",
+    re.IGNORECASE,
+)
+
+
+def _is_pe_or_sport_subject(subject: str) -> bool:
+    """True for physical education / sport electives (not e.g. «физическая химия»)."""
+    n = (subject or "").lower().replace("ё", "е")
+    if "физкульт" in n:
+        return True
+    if "физическ" in n and "культур" in n:
+        return True
+    if "культур" in n and "спорт" in n:
+        return True
+    if "электив" in n and "спорт" in n:
+        return True
+    return False
+
+
+def display_subject(subject: str) -> str:
+    """For PE/sport rows, drop inline teacher names after academic titles (short Telegram lines)."""
+    s = (subject or "").strip()
+    if not s or not _is_pe_or_sport_subject(s):
+        return s
+    m = _RE_INLINE_TEACHER_START.search(s)
+    if not m:
+        return s
+    return s[: m.start()].rstrip(" ,-–—")
+
+
+def _lesson_subject_for_display(les: dict) -> str:
+    return display_subject((les.get("subject") or "").strip())
 
 # Latin keys that students often type instead of identical-looking Cyrillic letters.
 _LOOKALIKE = str.maketrans(
@@ -268,7 +307,7 @@ async def build_full_schedule_txt_async(group: str) -> tuple[str, str | None]:
         else:
             for les in lessons:
                 t = (les.get("time") or "").strip()
-                subj = (les.get("subject") or "").strip()
+                subj = _lesson_subject_for_display(les)
                 lines.append(f"{t} {subj}".strip() if t else subj)
         lines.append("")
     doc = get_doc_url(group)
@@ -279,9 +318,12 @@ async def build_full_schedule_txt_async(group: str) -> tuple[str, str | None]:
 
 def format_lesson_line_html(les: dict) -> str:
     t = esc_html((les.get("time") or "").strip())
-    subj = esc_html((les.get("subject") or "").strip())
+    subj = esc_html(_lesson_subject_for_display(les))
     room = esc_html((les.get("room") or "").strip())
-    teacher = esc_html((les.get("teacher") or "").strip())
+    teacher_raw = (les.get("teacher") or "").strip()
+    if _is_pe_or_sport_subject((les.get("subject") or "").strip()):
+        teacher_raw = ""
+    teacher = esc_html(teacher_raw)
     if t and subj:
         line = f"<b>{t}</b> - {subj}"
     elif subj:
