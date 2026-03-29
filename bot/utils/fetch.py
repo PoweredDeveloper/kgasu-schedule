@@ -1,4 +1,4 @@
-"""Small network helper for the bot (no scraping — only fetching known .doc URLs)."""
+"""Small network helper for the bot (no scraping - only fetching known .doc URLs)."""
 
 from __future__ import annotations
 

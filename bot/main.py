@@ -44,7 +44,7 @@ async def main() -> None:
 
     schedule_service.reload_from_disk()
     if not schedule_service.get_all_groups():
-        logger.warning("schedules.json missing or empty — bot will show onboarding errors")
+        logger.warning("schedules.json missing or empty - bot will show onboarding errors")
 
     bot = Bot(config.BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())

@@ -40,10 +40,10 @@ def group_pagination(groups: list[str], page: int) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def home_kb(*, has_lessons: bool) -> InlineKeyboardMarkup:
+def home_kb(*, has_schedule_file: bool) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text=T.BTN_FULL_FILE, callback_data="k:fl")
-    if has_lessons:
+    if has_schedule_file:
         b.button(text=T.BTN_TODAY, callback_data="k:td")
         b.button(text=T.BTN_TOMORROW, callback_data="k:tmr")
     b.button(text=T.BTN_MENU, callback_data="k:smn")

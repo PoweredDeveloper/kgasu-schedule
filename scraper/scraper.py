@@ -1,4 +1,4 @@
-"""Scrape listing pages (with Bitrix pagination), .doc / .docx files, write schedules.json."""
+"""Scrape listing pages (Bitrix), collect schedule file URLs, write schedules.json (groups + doc_url only)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config
-from scraper.doc_parse import WEEKDAYS, parse_schedule_from_antiword, plain_text_from_schedule_file
+from scraper.doc_parse import WEEKDAYS
 from scraper.parser import (
     extract_doc_links,
     extract_max_listing_page,
@@ -33,7 +33,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
-def _delay() -> None:
+def _listing_delay() -> None:
     time.sleep(config.REQUEST_DELAY_SEC + random.uniform(0, 0.35))
 
 
@@ -44,7 +44,7 @@ def _fetch(client: httpx.Client, params: list[tuple[str, str]]) -> str:
         try:
             r = client.get(url, follow_redirects=True, timeout=60.0)
             r.raise_for_status()
-            _delay()
+            _listing_delay()
             return r.text
         except Exception as e:
             last_err = e
@@ -72,7 +72,7 @@ def _build_filter_params(*, kurs: str, institut: str) -> list[tuple[str, str]]:
 
 
 def _build_filter_params_semester_only() -> list[tuple[str, str]]:
-    """Match site behaviour «все» except semester — surfaces .docx like 25СЖ01,25СЖ02."""
+    """Match site behaviour «все» except semester - surfaces .docx like 25СЖ01,25СЖ02."""
     pairs: list[tuple[str, str]] = [("arrFilter_ff[NAME]", "")]
     if (v := config.SCRAPE_SEMESTR.strip()):
         pairs.append(("arrFilter_pf[SEMESTR]", v))
@@ -95,7 +95,7 @@ def _discover_urls(client: httpx.Client) -> tuple[dict[str, set[str]], int]:
         listing_http_count += 1
         html = _fetch(client, pairs)
         logger.info(
-            "[%s] listing %s page %s/%s — %s unique schedule files",
+            "[%s] listing %s page %s/%s - %s unique schedule files",
             listing_http_count,
             label,
             page,
@@ -112,7 +112,7 @@ def _discover_urls(client: httpx.Client) -> tuple[dict[str, set[str]], int]:
             add_from_html(first)
             last_page = extract_max_listing_page(first)
             logger.info(
-                "[%s] listing %s page 1/%s — %s unique schedule files",
+                "[%s] listing %s page 1/%s - %s unique schedule files",
                 listing_http_count,
                 label,
                 last_page,
@@ -132,7 +132,7 @@ def _discover_urls(client: httpx.Client) -> tuple[dict[str, set[str]], int]:
 
     ingest_listing(
         _build_filter_params_semester_only(),
-        "semester-only (all types/years/courses — catches .docx)",
+        "semester-only (all types/years/courses - catches .docx)",
     )
     ingest_listing(_build_filter_params(kurs="", institut=""), "broad year+sem+type")
 
@@ -169,66 +169,28 @@ def run() -> None:
     out_path = config.SCHEDULES_PATH
     headers = {"User-Agent": config.USER_AGENT}
     groups_out: dict[str, dict] = {}
-
-    if config.SCRAPE_SKIP_PARSE:
-        logger.info(
-            "SCRAPE_SKIP_PARSE: after discovery, only doc_url is stored (no download / extract / parse)"
-        )
+    empty = {d: [] for d in WEEKDAYS}
 
     with httpx.Client(headers=headers) as client:
-        url_to_groups, n_listing_http = _discover_urls(client)
-        n_urls = len(url_to_groups)
-        total_steps = n_listing_http + n_urls
-        logger.info(
-            "discovery done: %s listing requests, %s unique schedule files → total steps %s",
-            n_listing_http,
-            n_urls,
-            total_steps,
-        )
-
-        sorted_items = sorted(url_to_groups.items(), key=lambda x: x[0])
-        empty = {d: [] for d in WEEKDAYS}
-        for i, (url, gnames) in enumerate(sorted_items, start=1):
-            step = n_listing_http + i
-            if config.SCRAPE_SKIP_PARSE:
-                logger.info("[%s/%s] record url (parse skipped) %s", step, total_steps, url)
-                for g in sorted(gnames):
-                    groups_out[g] = dict(empty) | {"doc_url": url}
-                continue
-
-            logger.info("[%s/%s] download & parse %s", step, total_steps, url)
-            try:
-                r = client.get(url, follow_redirects=True, timeout=120.0)
-                r.raise_for_status()
-                raw = r.content
-            except Exception as e:
-                logger.error("[%s/%s] download failed: %s", step, total_steps, e)
-                for g in sorted(gnames):
-                    groups_out[g] = {d: [] for d in WEEKDAYS} | {"doc_url": url, "parse_error": str(e)}
-                _delay()
-                continue
-
-            _delay()
-            text = plain_text_from_schedule_file(url, raw)
-            if not text.strip():
-                sched = {d: [] for d in WEEKDAYS}
-                for g in sorted(gnames):
-                    groups_out[g] = sched | {"doc_url": url, "parse_error": "extract_empty"}
-                continue
-
-            sched = parse_schedule_from_antiword(text)
-            if sum(len(sched[d]) for d in WEEKDAYS) == 0:
-                logger.warning("parser produced 0 lessons for %s", url)
+        url_to_groups, n_listing = _discover_urls(client)
+        n_files = len(url_to_groups)
+        for url, gnames in sorted(url_to_groups.items(), key=lambda x: x[0]):
             for g in sorted(gnames):
-                groups_out[g] = dict(sched) | {"doc_url": url}
+                groups_out[g] = dict(empty) | {"doc_url": url}
+
+        logger.info(
+            "discovery done: %s listing HTTP requests, %s unique files → %s groups (doc_url only, no download)",
+            n_listing,
+            n_files,
+            len(groups_out),
+        )
 
     meta: dict = {
         "scraped_at": datetime.now(timezone.utc).isoformat(),
         "source_url": config.SCRAPE_BASE_URL,
         "groups_count": len(groups_out),
+        "parse_on_demand": True,
     }
-    if config.SCRAPE_SKIP_PARSE:
-        meta["parse_skipped"] = True
 
     payload = {
         "schema_version": 1,

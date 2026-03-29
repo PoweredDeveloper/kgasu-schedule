@@ -35,6 +35,27 @@ def test_parse_schedule_docx_style_row_with_repeated_weekday() -> None:
     assert len(sched["Monday"]) == 2
     assert sched["Monday"][0]["time"] == "9:40-11:10"
     assert "Математика" in sched["Monday"][0]["subject"]
+    assert sched["Monday"][0].get("week_parity") == "even"
+    assert sched["Monday"][1].get("week_parity") == "even"
+
+
+def test_parse_schedule_chet_and_nech_same_slot() -> None:
+    text = (
+        "Понедельник | 1 | Чет | 9:40:00 - 11:10:00 | Одинаково\n"
+        "Понедельник | 1 | Неч | 9:40:00 - 11:10:00 | Одинаково\n"
+    )
+    sched = parse_schedule_from_antiword(text)
+    assert len(sched["Monday"]) == 2
+    assert sched["Monday"][0]["week_parity"] == "even"
+    assert sched["Monday"][1]["week_parity"] == "odd"
+
+
+def test_week_parity_not_thursday() -> None:
+    from scraper.doc_parse import _week_parity_from_cell
+
+    assert _week_parity_from_cell("Чет") == "even"
+    assert _week_parity_from_cell("Неч") == "odd"
+    assert _week_parity_from_cell("Четверг") is None
 
 
 def test_parse_schedule_english_weekday_column() -> None:

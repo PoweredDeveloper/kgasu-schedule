@@ -10,9 +10,26 @@ services:
     volumes:
       - ./data:/app/data
 
-  # Запуск: docker compose --profile manual run --rm scraper
-  # Только список групп и doc_url (без скачивания .doc / разбора расписания):
-  #   SCRAPE_SKIP_PARSE=1 docker compose --profile manual run --rm scraper
+  # Периодический scraper внутри Docker (без cron на хосте):
+  #   docker compose --profile scheduler up -d
+  # Интервал между концом одного прогона и стартом следующего - SCRAPE_INTERVAL_SEC (по умолчанию 21600 = 6 ч).
+  scraper-scheduler:
+    build: .
+    profiles:
+      - scheduler
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SCHEDULES_PATH: /app/data/schedules.json
+      SCRAPE_INTERVAL_SEC: ${SCRAPE_INTERVAL_SEC:-21600}
+    volumes:
+      - ./data:/app/data
+    command: ["/app/scripts/scraper_loop.sh"]
+
+  # Разовый прогон: docker compose --profile manual run --rm scraper
+  # Scraper пишет только список групп + doc_url (без скачивания Word).
   scraper:
     build: .
     profiles:
@@ -22,7 +39,6 @@ services:
         required: false
     environment:
       SCHEDULES_PATH: /app/data/schedules.json
-      SCRAPE_SKIP_PARSE: ${SCRAPE_SKIP_PARSE:-}
     volumes:
       - ./data:/app/data
     command: ["python", "-m", "scraper.scraper"]

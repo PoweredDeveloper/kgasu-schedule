@@ -10,19 +10,19 @@ import config
 
 
 def week_bits_html() -> str:
-    """Even/odd from the ISO week number in TZ (no site scrape — may differ from KGASU’s table by ±1)."""
+    """«Чётная»/«нечётная» in TZ - inverted vs ISO week # so it matches KGASU tables (see schedule_service)."""
     z = ZoneInfo(config.TZ)
     now = datetime.now(z)
     _, iso_week, iso_wday = now.isocalendar()
     monday = now.date() - timedelta(days=iso_wday - 1)
     sunday = monday + timedelta(days=6)
     span = f"{monday.strftime('%d.%m')}–{sunday.strftime('%d.%m')}"
-    if iso_week % 2 != 0:
-        kind = "чётная"
-    else:
+    if iso_week % 2 == 0:
         kind = "нечётная"
+    else:
+        kind = "чётная"
     return (
-        f"<b>{span}</b> — по календарю это <b>{kind}</b> неделя "
+        f"<b>{span}</b> - по календарю это <b>{kind}</b> неделя "
     )
 
 
@@ -34,19 +34,21 @@ def onboarding_html() -> str:
     )
 
 
-def home_html(group: str, has_lessons: bool) -> str:
+def home_html(group: str, *, has_schedule_file: bool) -> str:
     g = escape(group)
     w = week_bits_html()
-    if has_lessons:
+    if has_schedule_file:
         body = (
             f"Ты в <b>{g}</b>.\n"
             f"{w}\n\n"
-            "<i>Ниже - быстрые кнопки.</i>"
+            "<i>Ниже - кнопки. «Сегодня» / «Завтра» / «Всё расписание» подтягивают файл с сайта и разбирают его в момент нажатия.</i>\n"
+            "<i>Если что-то не так - открой официальный файл с сайта.</i>"
         )
     else:
         body = (
             f"Ты в <b>{g}</b>.\n"
             f"{w}\n\n"
+            "<i>Для группы нет ссылки на файл - пусть админ прогонит scraper.</i>\n"
         )
     return body
 
@@ -61,28 +63,31 @@ def service_menu_html() -> str:
 def help_html() -> str:
     return (
         "<b>Коротко</b>\n"
-        "• <b>Список</b> — листаешь группы кнопками.\n"
-        "• Можно <b>просто написать группу в чат</b> — и со старта, и пока листаешь список.\n"
-        "• Кнопка <b>«Ввести вручную»</b> — то же, только с подсказкой. "
+        "• <b>Список</b> - листаешь группы кнопками.\n"
+        "• Можно <b>просто написать группу в чат</b> - и со старта, и пока листаешь список.\n"
+        "• Кнопка <b>«Ввести вручную»</b> - то же, только с подсказкой. "
         "<i>Регистр не важен</i>, латинская <code>C</code> = русская <code>С</code>.\n"
-        "• Бот <b>запоминает</b> группу. <b>Сменить группу</b> — выбрать заново.\n"
-        "• <b>Обновить кэш</b> — только перечитать файл на сервере; "
-        "если данных нет, пингани того, кто крутит <code>scraper</code>.\n\n"
+        "• Бот <b>запоминает</b> группу. <b>Сменить группу</b> - выбрать заново.\n"
+        "• <b>Обновить кэш</b> - только перечитать файл на сервере; "
+        "если данных нет, пингани того, кто крутит <code>scraper</code>.\n"
+        "• <b>Сегодня</b> / <b>Завтра</b> / <b>Всё расписание</b> - бот скачивает Word-файл с сайта "
+        "и разбирает его <b>в момент нажатия</b> (в кэше только список групп и ссылка на файл).\n"
+        "• Учитывается <b>чётная / нечётная неделя</b> по календарю (как «Чет»/«Неч» в таблице).\n\n"
     )
 
 
 def pick_page_html(page: int, total_pages: int) -> str:
     return (
         f"<b>Листай и жми свою группу</b> <i>(стр. {page + 1} из {total_pages})</i>\n\n"
-        "<i>Лень листать? Просто <b>напиши название группы</b> отдельным сообщением в чат — "
+        "<i>Лень листать? Просто <b>напиши название группы</b> отдельным сообщением в чат - "
         "пойму и так.</i>\n"
-        "<i>Кнопка «Ввести вручную» — то же самое, только с подсказкой.</i>"
+        "<i>Кнопка «Ввести вручную» - то же самое, только с подсказкой.</i>"
     )
 
 
 def manual_prompt_html() -> str:
     return (
-        "Напиши <b>название группы</b> одним сообщением — как на сайте.\n"
+        "Напиши <b>название группы</b> одним сообщением - как на сайте.\n"
         "<i>Можно капсом/строчными, лишние пробелы уберу.</i>"
     )
 
@@ -93,7 +98,8 @@ def manual_not_found_html(suggestions: list[str]) -> str:
         "",
         "Часто это значит, что <b>скрапер ещё не подтянул</b> свежие файлы с сайта "
         "(например, набор <b>25…</b> появился, а в кэше пока только <b>24…</b>). "
-        "Попроси админа: <code>docker compose --profile manual run --rm scraper</code>",
+        # "Попроси админа: Docker-профиль <code>scheduler</code> или разовый запуск "
+        # "<code>docker compose --profile manual run --rm scraper</code>.",
         "",
         "Проверь написание: латинская <code>C</code> = русская <code>С</code>, регистр не важен.",
     ]
@@ -106,11 +112,15 @@ def manual_not_found_html(suggestions: list[str]) -> str:
     lines.append("<i>Можешь написать группу ещё раз или выбрать из списка кнопками.</i>")
     return "\n".join(lines)
 
-GROUP_LIST_EMPTY = "В кэше пусто — сначала нужен scraper."
+GROUP_LIST_EMPTY = "В кэше пусто - сначала нужен scraper."
 
 UNKNOWN_GROUP = "Сначала выбери группу."
 
-NO_LESSONS_HTML = "<i>Пар не нашлось — отдыхай (или глянь файл).</i>"
+NO_LESSONS_HTML = "<i>Пар не нашлось - отдыхай (или глянь файл).</i>"
+
+SCHEDULE_ERR_NO_DOC = "<i>Нет ссылки на файл расписания - пусть админ прогонит scraper.</i>"
+SCHEDULE_ERR_DOWNLOAD = "<i>Не удалось скачать файл с сайта. Попробуй позже или открой официальный файл.</i>"
+SCHEDULE_ERR_EXTRACT = "<i>Не вышло извлечь текст из файла (пусто или битый файл).</i>"
 
 BTN_FROM_LIST = "Из списка"
 BTN_TYPE_MANUAL = "Ввести вручную"
@@ -127,7 +137,7 @@ BTN_PREV = "Назад"
 BTN_BACK = "Назад"
 
 RELOAD_OK = "Готово, перечитал файл."
-RELOAD_FAIL = "Файл не читается — админу смотреть логи."
+RELOAD_FAIL = "Файл не читается - админу смотреть логи."
 
 DAY_LABEL_RU = {
     "Monday": "Понедельник",

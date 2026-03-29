@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import pytest
 
@@ -29,14 +30,7 @@ def test_reload_from_disk_and_resolve_group(tmp_path, monkeypatch) -> None:
     payload = {
         "groups": {
             "25СЖ01": {
-                "Monday": [
-                    {
-                        "time": "10:00-11:00",
-                        "subject": "Лекция",
-                        "teacher": "",
-                        "room": "101",
-                    }
-                ],
+                "Monday": [],
                 "doc_url": "https://example.com/f.docx",
             }
         }
@@ -45,7 +39,7 @@ def test_reload_from_disk_and_resolve_group(tmp_path, monkeypatch) -> None:
     assert schedule_service.reload_from_disk()
     assert schedule_service.resolve_group_canonical("25сж01") == "25СЖ01"
     assert schedule_service.get_doc_url("25СЖ01") == "https://example.com/f.docx"
-    assert schedule_service.count_lessons("25СЖ01") == 1
+    assert schedule_service.group_has_schedule_file("25СЖ01")
 
 
 def test_suggest_groups() -> None:
@@ -66,6 +60,22 @@ def test_format_lesson_line_html_escapes() -> None:
     )
     assert "&lt;" in line
     assert "A&amp;B" in line
+
+
+def test_lessons_for_calendar_week_filters_by_parity() -> None:
+    lessons = [
+        {"time": "1", "subject": "Even only", "week_parity": "even"},
+        {"time": "2", "subject": "Odd only", "week_parity": "odd"},
+        {"time": "3", "subject": "Always", "teacher": ""},
+    ]
+    d_w1 = date(2024, 1, 3)  # ISO week 1 (odd) → inverted → «чётная» / Чет rows
+    assert schedule_service.calendar_week_parity_for_date(d_w1) == "even"
+    got = schedule_service._lessons_for_calendar_week(lessons, d_w1)
+    assert [x["subject"] for x in got] == ["Even only", "Always"]
+    d_w2 = date(2024, 1, 8)  # ISO week 2 (even) → «нечётная» / Неч rows
+    assert schedule_service.calendar_week_parity_for_date(d_w2) == "odd"
+    got_e = schedule_service._lessons_for_calendar_week(lessons, d_w2)
+    assert [x["subject"] for x in got_e] == ["Odd only", "Always"]
 
 
 def test_split_telegram_chunks() -> None:

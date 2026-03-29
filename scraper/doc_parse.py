@@ -46,6 +46,19 @@ def _hhmm_from_bitrix_time(t: str) -> str:
     return t.strip()[:5]
 
 
+def _week_parity_from_cell(cell: str) -> str | None:
+    """Map KGASU column «Чет» / «Неч» to even/odd calendar week slots."""
+    w = _norm_day((cell or "").strip())
+    if not w:
+        return None
+    if w.startswith("неч"):
+        return "odd"
+    # «Чет» (чётная неделя), not «четверг».
+    if w.startswith("чет") and not w.startswith("четверг"):
+        return "even"
+    return None
+
+
 def _empty_week() -> dict[str, list[dict[str, str]]]:
     return {d: [] for d in WEEKDAYS}
 
@@ -84,14 +97,16 @@ def parse_schedule_from_antiword(text: str) -> dict[str, list[dict[str, str]]]:
             time_s = f"{start}-{end}"
         else:
             time_s = start
-        by_day[current_day].append(
-            {
-                "time": time_s,
-                "subject": subj,
-                "teacher": "",
-                "room": "",
-            }
-        )
+        row: dict[str, str] = {
+            "time": time_s,
+            "subject": subj,
+            "teacher": "",
+            "room": "",
+        }
+        wp = pending.get("week_parity")
+        if wp in ("even", "odd"):
+            row["week_parity"] = wp
+        by_day[current_day].append(row)
         pending = None
 
     time_full = re.compile(
@@ -108,6 +123,7 @@ def parse_schedule_from_antiword(text: str) -> dict[str, list[dict[str, str]]]:
             continue
         c0, c3 = cells[0], cells[3]
         tail = " ".join(cells[4:]).strip()
+        parity_token = _week_parity_from_cell(cells[2]) if len(cells) > 2 else None
 
         t3 = c3.strip()
         m_full = time_full.match(t3)
@@ -163,7 +179,7 @@ def parse_schedule_from_antiword(text: str) -> dict[str, list[dict[str, str]]]:
         if m_full:
             flush()
             s, e = _hhmm_from_bitrix_time(m_full.group(1)), _hhmm_from_bitrix_time(m_full.group(2))
-            pending = {"start": s, "end": e, "subj": []}
+            pending = {"start": s, "end": e, "subj": [], "week_parity": parity_token}
             if tail:
                 pending["subj"].append(tail)
                 flush()
@@ -171,7 +187,12 @@ def parse_schedule_from_antiword(text: str) -> dict[str, list[dict[str, str]]]:
 
         if m_start:
             flush()
-            pending = {"start": _hhmm_from_bitrix_time(m_start.group(1)), "end": None, "subj": []}
+            pending = {
+                "start": _hhmm_from_bitrix_time(m_start.group(1)),
+                "end": None,
+                "subj": [],
+                "week_parity": parity_token,
+            }
             if tail:
                 pending["subj"].append(tail)
             continue
@@ -192,7 +213,7 @@ def docx_extract(doc_bytes: bytes) -> str:
     try:
         from docx import Document
     except ImportError:
-        logger.error("python-docx is required for .docx schedules (pip install python-docx)")
+        logger.error("python-docx is required for .docx schedules (add to project deps / uv sync)")
         return ""
     if not doc_bytes or doc_bytes[:2] != b"PK":
         return ""
@@ -258,5 +279,5 @@ def antiword_extract(doc_bytes: bytes) -> str:
             except OSError:
                 pass
     except FileNotFoundError:
-        logger.error("antiword not found — install it for structured schedules (Docker image includes it)")
+        logger.error("antiword not found - install it for structured schedules (Docker image includes it)")
         return ""

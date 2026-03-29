@@ -1,6 +1,6 @@
 import math
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -110,11 +110,11 @@ async def cb_pick(query: CallbackQuery, state: FSMContext) -> None:
     user_prefs.set_group(query.from_user.id, name)
     await state.set_state(Flow.home)
     await state.update_data(group=name)
-    has = schedule_service.count_lessons(name) > 0
+    has = schedule_service.group_has_schedule_file(name)
     await _edit(
         query,
-        T.home_html(name, has),
-        home_kb(has_lessons=has),
+        T.home_html(name, has_schedule_file=has),
+        home_kb(has_schedule_file=has),
     )
 
 
@@ -141,11 +141,11 @@ async def cb_back_home(query: CallbackQuery, state: FSMContext) -> None:
         await query.answer(T.UNKNOWN_GROUP, show_alert=True)
         return
     await query.answer()
-    has = schedule_service.count_lessons(group) > 0
+    has = schedule_service.group_has_schedule_file(group)
     await _edit(
         query,
-        T.home_html(group, has),
-        home_kb(has_lessons=has),
+        T.home_html(group, has_schedule_file=has),
+        home_kb(has_schedule_file=has),
     )
 
 
@@ -169,43 +169,44 @@ async def cb_full_file(query: CallbackQuery, state: FSMContext) -> None:
         await query.answer(T.UNKNOWN_GROUP, show_alert=True)
         return
     await query.answer()
-    has = schedule_service.count_lessons(group) > 0
-    if has:
-        body = schedule_service.build_full_schedule_txt(group)
+    has = schedule_service.group_has_schedule_file(group)
+    body, err = await schedule_service.build_full_schedule_txt_async(group)
+    if err is None and body:
         fn = f"raspisanie_{_safe_filename(group)}.txt"
         await query.message.answer_document(
             BufferedInputFile(body.encode("utf-8"), filename=fn),
-            caption="<b>Вот целиком</b> <i>(.txt из кэша)</i>",
+            caption="<b>Вот целиком</b> <i>(с сайта, текущая чётность недели)</i>",
             parse_mode="HTML",
         )
     else:
         url = schedule_service.get_doc_url(group)
         if not url:
-            await query.message.answer(
-                "<i>Нет ни распарсенных пар, ни ссылки на файл — пингани админа.</i>",
-                parse_mode="HTML",
-            )
+            await query.message.answer(T.SCHEDULE_ERR_NO_DOC, parse_mode="HTML")
+        elif err == "download_failed":
+            await query.message.answer(T.SCHEDULE_ERR_DOWNLOAD, parse_mode="HTML")
+        elif err == "extract_empty":
+            await query.message.answer(T.SCHEDULE_ERR_EXTRACT, parse_mode="HTML")
         else:
             try:
                 raw = await download_bytes(url)
             except Exception:
                 await query.message.answer(
-                    "<i>Не смог скачать .doc с сайта — открой вручную:</i>\n" + url,
+                    "<i>Не смог скачать файл - открой вручную:</i>\n" + url,
                     parse_mode="HTML",
                 )
             else:
                 fn = url.rsplit("/", 1)[-1].split("?")[0] or "raspisanie.doc"
-                if not fn.lower().endswith(".doc"):
+                if not fn.lower().endswith((".doc", ".docx")):
                     fn += ".doc"
                 await query.message.answer_document(
                     BufferedInputFile(raw, filename=fn[:120]),
-                    caption="<b>Официальный файл</b> с сайта <i>(парсер тут пустой)</i>",
+                    caption="<b>Официальный файл</b> с сайта",
                     parse_mode="HTML",
                 )
     await query.message.answer(
         "<i>Что дальше?</i>",
         parse_mode="HTML",
-        reply_markup=home_kb(has_lessons=has),
+        reply_markup=home_kb(has_schedule_file=has),
     )
 
 
@@ -217,21 +218,28 @@ async def cb_today(query: CallbackQuery, state: FSMContext) -> None:
         await query.answer(T.UNKNOWN_GROUP, show_alert=True)
         return
     await query.answer()
-    lessons = schedule_service.get_today(group)
     z = ZoneInfo(config.TZ)
-    wd = datetime.now(z).weekday()
-    title = T.DAY_LABEL_RU.get(WEEKDAYS[wd], "")
-    if not lessons:
+    now = datetime.now(z)
+    d: date = now.date()
+    lessons, err = await schedule_service.lessons_for_date_async(group, d)
+    title = T.DAY_LABEL_RU.get(WEEKDAYS[now.weekday()], "")
+    if err == "no_doc_url":
+        body = f"<b>{title}</b>\n\n{T.SCHEDULE_ERR_NO_DOC}"
+    elif err == "download_failed":
+        body = f"<b>{title}</b>\n\n{T.SCHEDULE_ERR_DOWNLOAD}"
+    elif err == "extract_empty":
+        body = f"<b>{title}</b>\n\n{T.SCHEDULE_ERR_EXTRACT}"
+    elif not lessons:
         body = f"<b>{title}</b>\n\n{T.NO_LESSONS_HTML}"
     else:
         lines = [f"<b>{title}</b>", ""] + [format_lesson_line_html(x) for x in lessons]
         body = "\n".join(lines)
     await query.message.answer(body, parse_mode="HTML")
-    has = schedule_service.count_lessons(group) > 0
+    has = schedule_service.group_has_schedule_file(group)
     await query.message.answer(
         "<i>Назад к кнопкам 👇</i>",
         parse_mode="HTML",
-        reply_markup=home_kb(has_lessons=has),
+        reply_markup=home_kb(has_schedule_file=has),
     )
 
 
@@ -243,19 +251,25 @@ async def cb_tomorrow(query: CallbackQuery, state: FSMContext) -> None:
         await query.answer(T.UNKNOWN_GROUP, show_alert=True)
         return
     await query.answer()
-    lessons = schedule_service.get_tomorrow(group)
     z = ZoneInfo(config.TZ)
-    t = (datetime.now(z).date() + timedelta(days=1)).weekday()
-    title = T.DAY_LABEL_RU.get(WEEKDAYS[t], "")
-    if not lessons:
+    tomorrow = datetime.now(z).date() + timedelta(days=1)
+    lessons, err = await schedule_service.lessons_for_date_async(group, tomorrow)
+    title = T.DAY_LABEL_RU.get(WEEKDAYS[tomorrow.weekday()], "")
+    if err == "no_doc_url":
+        body = f"<b>{title}</b>\n\n{T.SCHEDULE_ERR_NO_DOC}"
+    elif err == "download_failed":
+        body = f"<b>{title}</b>\n\n{T.SCHEDULE_ERR_DOWNLOAD}"
+    elif err == "extract_empty":
+        body = f"<b>{title}</b>\n\n{T.SCHEDULE_ERR_EXTRACT}"
+    elif not lessons:
         body = f"<b>{title}</b>\n\n{T.NO_LESSONS_HTML}"
     else:
         lines = [f"<b>{title}</b>", ""] + [format_lesson_line_html(x) for x in lessons]
         body = "\n".join(lines)
     await query.message.answer(body, parse_mode="HTML")
-    has = schedule_service.count_lessons(group) > 0
+    has = schedule_service.group_has_schedule_file(group)
     await query.message.answer(
         "<i>Назад к кнопкам 👇</i>",
         parse_mode="HTML",
-        reply_markup=home_kb(has_lessons=has),
+        reply_markup=home_kb(has_schedule_file=has),
     )

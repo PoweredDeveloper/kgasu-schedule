@@ -1,12 +1,13 @@
-"""In-memory cache of schedules.json + helpers for lookups and formatting."""
+"""In-memory cache of schedules.json + lookups, on-demand fetch/parse of Word files."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import unicodedata
 from html import escape as esc_html
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -166,11 +167,13 @@ def _day_map(group: str) -> dict[str, list[dict]]:
 
 
 def get_schedule(group: str) -> dict[str, list[dict]]:
+    """Cached weekday lists are empty when using doc_url-only scraper; prefer async loaders."""
     return _day_map(group)
 
 
-def count_lessons(group: str) -> int:
-    return sum(len(get_schedule(group).get(d, [])) for d in WEEKDAYS)
+def group_has_schedule_file(group: str) -> bool:
+    """True if the group has a doc_url (bot can fetch and parse on demand)."""
+    return get_doc_url(group) is not None
 
 
 def get_doc_url(group: str) -> str | None:
@@ -186,49 +189,82 @@ def _weekday_key_for_date(d) -> str:
     return WEEKDAYS[d.weekday()]
 
 
-def get_today(group: str) -> list[dict]:
-    z = ZoneInfo(config.TZ)
-    now = datetime.now(z)
-    key = _weekday_key_for_date(now.date())
-    return _day_map(group).get(key, [])
+def calendar_week_parity_for_date(d: date) -> str:
+    """
+    Map calendar date → table column «Чет» / «Неч» (stored as week_parity even/odd).
+
+    KGASU week numbering does not match raw ISO parity: use **inverted** ISO parity so the
+    banner («чётная»/«нечётная») and filtered rows stay aligned with the site’s tables.
+    """
+    _, iso_week, _ = d.isocalendar()
+    # Even ISO week → «нечётная» / Неч; odd ISO week → «чётная» / Чет
+    return "odd" if iso_week % 2 == 0 else "even"
 
 
-def get_tomorrow(group: str) -> list[dict]:
-    z = ZoneInfo(config.TZ)
-    now = datetime.now(z)
-    t = now.date() + timedelta(days=1)
-    key = _weekday_key_for_date(t)
-    return _day_map(group).get(key, [])
+def _lessons_for_calendar_week(lessons: list[dict], ref: date) -> list[dict]:
+    want = calendar_week_parity_for_date(ref)
+    out: list[dict] = []
+    for les in lessons:
+        p = les.get("week_parity")
+        if p not in ("even", "odd") or p == want:
+            out.append(les)
+    return out
 
 
-def format_lesson_line_html(les: dict) -> str:
-    t = esc_html((les.get("time") or "").strip())
-    subj = esc_html((les.get("subject") or "").strip())
-    room = esc_html((les.get("room") or "").strip())
-    teacher = esc_html((les.get("teacher") or "").strip())
-    if t and subj:
-        line = f"<b>{t}</b> — {subj}"
-    elif subj:
-        line = subj
-    else:
-        line = "—"
-    if room:
-        line += f" <i>(ауд. {room})</i>"
-    if teacher:
-        line += f"\n<i>{teacher}</i>"
-    return line
+async def load_parsed_week(group: str) -> tuple[dict[str, list[dict]] | None, str | None]:
+    """
+    Download group's schedule file and parse into weekday -> lessons.
+    Returns (schedule, None) or (None, error_code): no_doc_url, download_failed, extract_empty.
+    """
+    url = get_doc_url(group)
+    if not url:
+        return None, "no_doc_url"
+    try:
+        from bot.utils.fetch import download_bytes
+
+        raw = await download_bytes(url)
+    except Exception:
+        return None, "download_failed"
+
+    def _parse() -> tuple[dict[str, list[dict]] | None, str | None]:
+        from scraper.doc_parse import parse_schedule_from_antiword, plain_text_from_schedule_file
+
+        text = plain_text_from_schedule_file(url, raw)
+        if not text.strip():
+            return None, "extract_empty"
+        return parse_schedule_from_antiword(text), None
+
+    return await asyncio.to_thread(_parse)
 
 
-def build_full_schedule_txt(group: str) -> str:
+async def lessons_for_date_async(group: str, d: date) -> tuple[list[dict], str | None]:
+    """Lessons for calendar date `d` with week-parity filter. Error code only on fetch/parse failure."""
+    full, err = await load_parsed_week(group)
+    if err:
+        return [], err
+    assert full is not None
+    key = _weekday_key_for_date(d)
+    raw_list = full.get(key, [])
+    return _lessons_for_calendar_week(raw_list, d), None
+
+
+async def build_full_schedule_txt_async(group: str) -> tuple[str, str | None]:
+    """Build .txt for all weekdays (parity-filtered for current ISO week)."""
+    full, err = await load_parsed_week(group)
+    if err:
+        return "", err
+    assert full is not None
     import bot.texts as T
 
+    z = ZoneInfo(config.TZ)
+    ref = datetime.now(z).date()
     lines: list[str] = []
-    for d in WEEKDAYS:
-        lines.append(T.DAY_LABEL_RU.get(d, d))
+    for day in WEEKDAYS:
+        lines.append(T.DAY_LABEL_RU.get(day, day))
         lines.append("")
-        lessons = get_schedule(group).get(d) or []
+        lessons = _lessons_for_calendar_week(full.get(day) or [], ref)
         if not lessons:
-            lines.append("—")
+            lines.append("-")
         else:
             for les in lessons:
                 t = (les.get("time") or "").strip()
@@ -238,7 +274,25 @@ def build_full_schedule_txt(group: str) -> str:
     doc = get_doc_url(group)
     if doc:
         lines.append(f"Файл на сайте: {doc}")
-    return "\n".join(lines).strip()
+    return "\n".join(lines).strip(), None
+
+
+def format_lesson_line_html(les: dict) -> str:
+    t = esc_html((les.get("time") or "").strip())
+    subj = esc_html((les.get("subject") or "").strip())
+    room = esc_html((les.get("room") or "").strip())
+    teacher = esc_html((les.get("teacher") or "").strip())
+    if t and subj:
+        line = f"<b>{t}</b> - {subj}"
+    elif subj:
+        line = subj
+    else:
+        line = "-"
+    if room:
+        line += f" <i>(ауд. {room})</i>"
+    if teacher:
+        line += f"\n<i>{teacher}</i>"
+    return line
 
 
 def split_telegram_chunks(text: str, limit: int = 3800) -> list[str]:

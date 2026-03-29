@@ -34,16 +34,14 @@ USER_AGENT = os.environ.get(
     "Mozilla/5.0 (compatible; KGASU-ScheduleBot/1.0; +https://www.kgasu.ru/)",
 )
 
-REQUEST_DELAY_SEC = float(os.environ.get("SCRAPE_DELAY_SEC", "0.5"))
-REQUEST_RETRIES = int(os.environ.get("SCRAPE_RETRIES", "3"))
-
-# Discovery only: write groups + doc_url, skip file download / antiword / structured parse
-SCRAPE_SKIP_PARSE = os.environ.get("SCRAPE_SKIP_PARSE", "").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
+# Politeness delay after each **listing** HTTP response (main Bitrix site).
+REQUEST_DELAY_SEC = float(
+    os.environ.get(
+        "SCRAPE_LISTING_DELAY_SEC",
+        os.environ.get("SCRAPE_DELAY_SEC", "0.5"),
+    )
 )
+REQUEST_RETRIES = int(os.environ.get("SCRAPE_RETRIES", "3"))
 
 SCHEDULE_RELOAD_SEC = int(os.environ.get("SCHEDULE_RELOAD_SEC", "300"))
 SCHEDULE_POLL_SEC = int(os.environ.get("SCHEDULE_POLL_SEC", "60"))

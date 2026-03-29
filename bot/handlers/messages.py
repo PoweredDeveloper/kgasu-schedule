@@ -18,11 +18,11 @@ async def _send_home(message: Message, state: FSMContext, canon: str) -> None:
     user_prefs.set_group(message.from_user.id, canon)
     await state.set_state(Flow.home)
     await state.update_data(group=canon)
-    has = schedule_service.count_lessons(canon) > 0
+    has = schedule_service.group_has_schedule_file(canon)
     await message.answer(
-        T.home_html(canon, has),
+        T.home_html(canon, has_schedule_file=has),
         parse_mode="HTML",
-        reply_markup=home_kb(has_lessons=has),
+        reply_markup=home_kb(has_schedule_file=has),
     )
 
 
