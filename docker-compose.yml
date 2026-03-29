@@ -1,0 +1,28 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SCHEDULES_PATH: /app/data/schedules.json
+    volumes:
+      - ./data:/app/data
+
+  # Запуск: docker compose --profile manual run --rm scraper
+  # Только список групп и doc_url (без скачивания .doc / разбора расписания):
+  #   SCRAPE_SKIP_PARSE=1 docker compose --profile manual run --rm scraper
+  scraper:
+    build: .
+    profiles:
+      - manual
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SCHEDULES_PATH: /app/data/schedules.json
+      SCRAPE_SKIP_PARSE: ${SCRAPE_SKIP_PARSE:-}
+    volumes:
+      - ./data:/app/data
+    command: ["python", "-m", "scraper.scraper"]
