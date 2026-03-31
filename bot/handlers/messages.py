@@ -4,12 +4,17 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 import bot.texts as T
-from bot.keyboards.inline import home_kb, manual_cancel_kb, onboarding_kb, group_pagination
+from bot.keyboards.inline import (
+    group_picker_kb,
+    home_kb,
+    manual_cancel_kb,
+    onboarding_kb,
+    prefix_picker_kb,
+    year_picker_kb,
+)
 from bot.services import schedule_service
 from bot.services import user_prefs
 from bot.services.user_state import Flow
-import config
-import math
 
 router = Router()
 
@@ -46,14 +51,34 @@ async def text_as_group_name(message: Message, state: FSMContext) -> None:
     st = await state.get_state()
     if st == Flow.picking_group.state:
         data = await state.get_data()
-        page = int(data.get("page", 0))
-        groups = schedule_service.get_all_groups()
-        if groups:
-            pages = max(1, math.ceil(len(groups) / config.GROUPS_PAGE_SIZE))
+        stage = data.get("picker_stage")
+        if stage == "group":
+            year = data.get("picker_year")
+            prefix = data.get("picker_prefix")
+            groups = data.get("picker_groups") or []
+            if year and prefix and groups:
+                await message.answer(
+                    T.pick_group_html(year, prefix, len(groups)),
+                    parse_mode="HTML",
+                    reply_markup=group_picker_kb(groups),
+                )
+                return
+        if stage == "prefix":
+            year = data.get("picker_year")
+            prefixes = data.get("picker_prefixes") or []
+            if year and prefixes:
+                await message.answer(
+                    T.pick_prefix_html(year, len(prefixes)),
+                    parse_mode="HTML",
+                    reply_markup=prefix_picker_kb(prefixes),
+                )
+                return
+        years = data.get("picker_years") or schedule_service.get_group_years()
+        if years:
             await message.answer(
-                T.pick_page_html(page, pages),
+                T.pick_year_html(len(years)),
                 parse_mode="HTML",
-                reply_markup=group_pagination(groups, page),
+                reply_markup=year_picker_kb(years),
             )
     elif st == Flow.enter_manual.state:
         await message.answer(

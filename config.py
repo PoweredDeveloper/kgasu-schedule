@@ -18,6 +18,8 @@ def _path(name: str, default: str) -> Path:
 
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+# Optional: shown in «Поддержка» (e.g. @username or t.me/… link)
+SUPPORT_CONTACT = os.environ.get("SUPPORT_CONTACT", "").strip()
 SCHEDULES_PATH = _path("SCHEDULES_PATH", "data/schedules.json")
 USER_PREFS_PATH = _path("USER_PREFS_PATH", "data/user_groups.json")
 

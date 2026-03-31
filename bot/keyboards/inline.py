@@ -41,6 +41,34 @@ def group_pagination(groups: list[str], page: int) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
+def year_picker_kb(years: list[str]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for idx, year in enumerate(years):
+        b.button(text=f"{year} год", callback_data=f"k:y:{idx}")
+    b.button(text=T.BTN_TYPE_MANUAL, callback_data="k:tin")
+    b.button(text=T.BTN_BACK, callback_data="k:bon")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def prefix_picker_kb(prefixes: list[str]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for idx, prefix in enumerate(prefixes):
+        b.button(text=prefix, callback_data=f"k:pf:{idx}")
+    b.button(text=T.BTN_BACK, callback_data="k:yb")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def group_picker_kb(groups: list[str]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for idx, group in enumerate(groups):
+        b.button(text=group, callback_data=f"k:g:{idx}")
+    b.button(text=T.BTN_BACK, callback_data="k:pb")
+    b.adjust(1)
+    return b.as_markup()
+
+
 def home_kb(*, group: str) -> InlineKeyboardMarkup:
     doc_url = schedule_service.get_doc_url(group)
     has = doc_url is not None
@@ -58,9 +86,8 @@ def home_kb(*, group: str) -> InlineKeyboardMarkup:
 
 def service_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text=T.BTN_HELP, callback_data="k:hp")
-    b.button(text=T.BTN_RELOAD, callback_data="k:rl")
-    b.button(text=T.BTN_BACK_HOME, callback_data="k:bhm")
+    b.button(text=T.BTN_TO_SCHEDULE, callback_data="k:bhm")
+    b.button(text=T.BTN_SUPPORT, callback_data="k:sup")
     b.adjust(1)
     return b.as_markup()
 

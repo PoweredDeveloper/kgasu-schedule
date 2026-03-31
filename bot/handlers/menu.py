@@ -1,4 +1,3 @@
-import math
 import re
 from datetime import date, datetime, timedelta
 
@@ -11,11 +10,13 @@ from zoneinfo import ZoneInfo
 import bot.texts as T
 import config
 from bot.keyboards.inline import (
-    group_pagination,
+    group_picker_kb,
     home_kb,
     manual_cancel_kb,
     onboarding_kb,
+    prefix_picker_kb,
     service_kb,
+    year_picker_kb,
 )
 from bot.services import schedule_service
 from bot.services import user_prefs
@@ -38,8 +39,21 @@ async def _edit(query: CallbackQuery, text: str, kb, *, parse_mode: str = "HTML"
         pass
 
 
-def _pick_pages(total: int) -> int:
-    return max(1, math.ceil(total / config.GROUPS_PAGE_SIZE) if total else 1)
+async def _open_year_picker(query: CallbackQuery, state: FSMContext) -> None:
+    years = schedule_service.get_group_years()
+    if not years:
+        await query.answer(T.GROUP_LIST_EMPTY, show_alert=True)
+        return
+    await state.set_state(Flow.picking_group)
+    await state.update_data(
+        picker_stage="year",
+        picker_years=years,
+        picker_prefixes=[],
+        picker_groups=[],
+        picker_year=None,
+        picker_prefix=None,
+    )
+    await _edit(query, T.pick_year_html(len(years)), year_picker_kb(years))
 
 
 @router.callback_query(F.data == "k:bon")
@@ -58,50 +72,113 @@ async def cb_type_manual(query: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "k:sl")
 async def cb_select_list(query: CallbackQuery, state: FSMContext) -> None:
-    groups = schedule_service.get_all_groups()
-    if not groups:
-        await query.answer(T.GROUP_LIST_EMPTY, show_alert=True)
-        return
     await query.answer()
-    await state.set_state(Flow.picking_group)
-    await state.update_data(page=0)
-    pages = _pick_pages(len(groups))
-    await _edit(
-        query,
-        T.pick_page_html(0, pages),
-        group_pagination(groups, 0),
-    )
+    await _open_year_picker(query, state)
 
 
-@router.callback_query(F.data.startswith("k:pg:"))
-async def cb_page(query: CallbackQuery, state: FSMContext) -> None:
-    groups = schedule_service.get_all_groups()
-    if not groups:
+@router.callback_query(F.data == "k:yb")
+async def cb_back_to_years(query: CallbackQuery, state: FSMContext) -> None:
+    await query.answer()
+    years = schedule_service.get_group_years()
+    if not years:
         await query.answer(T.GROUP_LIST_EMPTY, show_alert=True)
         return
+    await state.update_data(
+        picker_stage="year",
+        picker_years=years,
+        picker_prefixes=[],
+        picker_groups=[],
+        picker_year=None,
+        picker_prefix=None,
+    )
+    await _edit(query, T.pick_year_html(len(years)), year_picker_kb(years))
+
+
+@router.callback_query(F.data.startswith("k:y:"))
+async def cb_pick_year(query: CallbackQuery, state: FSMContext) -> None:
     try:
-        page = int(query.data.split(":")[2])
+        idx = int(query.data.split(":")[2])
     except (IndexError, ValueError):
         await query.answer()
         return
     await query.answer()
-    await state.update_data(page=page)
-    pages = _pick_pages(len(groups))
-    await _edit(
-        query,
-        T.pick_page_html(page, pages),
-        group_pagination(groups, page),
+    data = await state.get_data()
+    years = data.get("picker_years") or schedule_service.get_group_years()
+    if idx < 0 or idx >= len(years):
+        await query.answer(T.UNKNOWN_GROUP, show_alert=True)
+        return
+    year = years[idx]
+    prefixes = schedule_service.get_prefixes_for_year(year)
+    if not prefixes:
+        await query.answer(T.GROUP_LIST_EMPTY, show_alert=True)
+        return
+    await state.update_data(
+        picker_stage="prefix",
+        picker_year=year,
+        picker_prefixes=prefixes,
+        picker_groups=[],
+        picker_prefix=None,
     )
+    await _edit(query, T.pick_prefix_html(year, len(prefixes)), prefix_picker_kb(prefixes))
 
 
-@router.callback_query(F.data.startswith("k:i:"))
-async def cb_pick(query: CallbackQuery, state: FSMContext) -> None:
-    groups = schedule_service.get_all_groups()
+@router.callback_query(F.data == "k:pb")
+async def cb_back_to_prefixes(query: CallbackQuery, state: FSMContext) -> None:
+    await query.answer()
+    data = await state.get_data()
+    year = data.get("picker_year")
+    if not year:
+        await _open_year_picker(query, state)
+        return
+    prefixes = schedule_service.get_prefixes_for_year(year)
+    if not prefixes:
+        await query.answer(T.GROUP_LIST_EMPTY, show_alert=True)
+        return
+    await state.update_data(
+        picker_stage="prefix",
+        picker_prefixes=prefixes,
+        picker_groups=[],
+        picker_prefix=None,
+    )
+    await _edit(query, T.pick_prefix_html(year, len(prefixes)), prefix_picker_kb(prefixes))
+
+
+@router.callback_query(F.data.startswith("k:pf:"))
+async def cb_pick_prefix(query: CallbackQuery, state: FSMContext) -> None:
+    try:
+        idx = int(query.data.split(":")[2])
+    except (IndexError, ValueError):
+        await query.answer()
+        return
+    await query.answer()
+    data = await state.get_data()
+    year = data.get("picker_year")
+    prefixes = data.get("picker_prefixes") or []
+    if not year or idx < 0 or idx >= len(prefixes):
+        await query.answer(T.UNKNOWN_GROUP, show_alert=True)
+        return
+    prefix = prefixes[idx]
+    groups = schedule_service.get_groups_for_year_prefix(year, prefix)
+    if not groups:
+        await query.answer(T.GROUP_LIST_EMPTY, show_alert=True)
+        return
+    await state.update_data(
+        picker_stage="group",
+        picker_prefix=prefix,
+        picker_groups=groups,
+    )
+    await _edit(query, T.pick_group_html(year, prefix, len(groups)), group_picker_kb(groups))
+
+
+@router.callback_query(F.data.startswith("k:g:"))
+async def cb_pick_group(query: CallbackQuery, state: FSMContext) -> None:
     try:
         idx = int(query.data.split(":")[2])
     except (IndexError, ValueError):
         await query.answer(T.UNKNOWN_GROUP, show_alert=True)
         return
+    data = await state.get_data()
+    groups = data.get("picker_groups") or []
     if idx < 0 or idx >= len(groups):
         await query.answer(T.UNKNOWN_GROUP, show_alert=True)
         return
@@ -153,6 +230,12 @@ async def cb_back_home(query: CallbackQuery, state: FSMContext) -> None:
 async def cb_help(query: CallbackQuery) -> None:
     await query.answer()
     await query.message.answer(T.help_html(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "k:sup")
+async def cb_support(query: CallbackQuery) -> None:
+    await query.answer()
+    await query.message.answer(T.support_html(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "k:rl")

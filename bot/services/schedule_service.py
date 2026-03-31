@@ -150,6 +150,51 @@ def get_all_groups() -> list[str]:
     return sorted(names, key=lambda x: x.casefold())
 
 
+def split_group_name(group: str) -> tuple[str, str, str] | None:
+    """Split group into year/prefix/number, e.g. 25СЖ01 -> ('25', 'СЖ', '01')."""
+    s = normalize_group_input(group).strip()
+    m = re.match(r"^(\d{2})([A-Za-zА-Яа-яЁё]+)(\d+)$", s)
+    if not m:
+        return None
+    year, prefix, number = m.groups()
+    return year, prefix.upper(), number
+
+
+def get_group_years() -> list[str]:
+    years: set[str] = set()
+    for g in get_all_groups():
+        parts = split_group_name(g)
+        if parts:
+            years.add(parts[0])
+    return sorted(years, key=int, reverse=True)
+
+
+def get_prefixes_for_year(year: str) -> list[str]:
+    prefixes: set[str] = set()
+    for g in get_all_groups():
+        parts = split_group_name(g)
+        if not parts:
+            continue
+        gy, pref, _ = parts
+        if gy == year:
+            prefixes.add(pref)
+    return sorted(prefixes, key=lambda x: x.casefold())
+
+
+def get_groups_for_year_prefix(year: str, prefix: str) -> list[str]:
+    out: list[tuple[int, str]] = []
+    want_prefix = normalize_group_input(prefix).upper()
+    for g in get_all_groups():
+        parts = split_group_name(g)
+        if not parts:
+            continue
+        gy, pref, num = parts
+        if gy == year and pref == want_prefix:
+            out.append((int(num), g))
+    out.sort(key=lambda x: x[0])
+    return [g for _, g in out]
+
+
 def suggest_groups(user_input: str, limit: int = 6) -> list[str]:
     """Fuzzy hints when exact group is missing (e.g. 25СЖ01 not scraped yet but 24СЖ01 exists)."""
     import re
@@ -293,27 +338,38 @@ async def build_full_schedule_txt_async(group: str) -> tuple[str, str | None]:
     if err:
         return "", err
     assert full is not None
-    import bot.texts as T
 
     z = ZoneInfo(config.TZ)
     ref = datetime.now(z).date()
+    body = _build_week_txt(full, ref)
+    doc = get_doc_url(group)
+    if doc:
+        body += f"\n\nФайл на сайте: {doc}"
+    return body.strip(), None
+
+
+def _build_week_txt(full: dict[str, list[dict]], ref: date) -> str:
+    import bot.texts as T
+
     lines: list[str] = []
-    for day in WEEKDAYS:
+    for i, day in enumerate(WEEKDAYS):
         lines.append(T.DAY_LABEL_RU.get(day, day))
         lines.append("")
         lessons = _lessons_for_calendar_week(full.get(day) or [], ref)
         if not lessons:
             lines.append("-")
         else:
-            for les in lessons:
+            for j, les in enumerate(lessons):
                 t = (les.get("time") or "").strip()
                 subj = _lesson_subject_for_display(les)
                 lines.append(f"{t} {subj}".strip() if t else subj)
+                if j < len(lessons) - 1:
+                    lines.append("")
         lines.append("")
-    doc = get_doc_url(group)
-    if doc:
-        lines.append(f"Файл на сайте: {doc}")
-    return "\n".join(lines).strip(), None
+        if i < len(WEEKDAYS) - 1:
+            lines.append("--------------------")
+            lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def format_lesson_line_html(les: dict) -> str:

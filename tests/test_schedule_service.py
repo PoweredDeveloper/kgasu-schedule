@@ -42,6 +42,30 @@ def test_reload_from_disk_and_resolve_group(tmp_path, monkeypatch) -> None:
     assert schedule_service.group_has_schedule_file("25СЖ01")
 
 
+def test_group_hierarchy_helpers() -> None:
+    path = config.SCHEDULES_PATH
+    path.write_text(
+        json.dumps(
+            {
+                "groups": {
+                    "24СЖ02": {},
+                    "25СЖ02": {},
+                    "25СЖ01": {},
+                    "25ПГС01": {},
+                    "ABCD": {},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    schedule_service.reload_from_disk()
+    assert schedule_service.split_group_name("25СЖ01") == ("25", "СЖ", "01")
+    assert schedule_service.split_group_name("ABCD") is None
+    assert schedule_service.get_group_years() == ["25", "24"]
+    assert schedule_service.get_prefixes_for_year("25") == ["ПГС", "СЖ"]
+    assert schedule_service.get_groups_for_year_prefix("25", "СЖ") == ["25СЖ01", "25СЖ02"]
+
+
 def test_suggest_groups() -> None:
     path = config.SCHEDULES_PATH
     path.write_text(
@@ -113,3 +137,14 @@ def test_split_telegram_chunks() -> None:
     parts = schedule_service.split_telegram_chunks(big, limit=30)
     assert len(parts) > 1
     assert "".join(parts).replace("\n", "") == big
+
+
+def test_build_week_txt_has_separators_and_spacing() -> None:
+    full = {d: [] for d in schedule_service.WEEKDAYS}
+    full["Monday"] = [
+        {"time": "9:40-11:10", "subject": "Математика"},
+        {"time": "11:20-12:50", "subject": "Физика"},
+    ]
+    txt = schedule_service._build_week_txt(full, date(2024, 1, 8))
+    assert "Понедельник\n\n9:40-11:10 Математика\n\n11:20-12:50 Физика" in txt
+    assert "--------------------" in txt

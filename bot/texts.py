@@ -60,6 +60,13 @@ def service_menu_html() -> str:
     )
 
 
+def support_html() -> str:
+    c = (config.SUPPORT_CONTACT or "").strip()
+    if c:
+        return f"<b>Поддержка</b>\n{escape(c)}"
+    return "<b>Поддержка</b>\n<i>Свяжись с администратором бота.</i>"
+
+
 def help_html() -> str:
     return (
         "<b>Коротко</b>\n"
@@ -83,6 +90,27 @@ def pick_page_html(page: int, total_pages: int) -> str:
         "<i>Лень листать? Просто <b>напиши название группы</b> отдельным сообщением в чат - "
         "пойму и так.</i>\n"
         "<i>Кнопка «Ввести вручную» - то же самое, только с подсказкой.</i>"
+    )
+
+
+def pick_year_html(total_years: int) -> str:
+    return (
+        f"<b>Шаг 1 из 3: выбери год</b> <i>({total_years} вариантов)</i>\n\n"
+        "<i>Или напиши полное название группы вручную.</i>"
+    )
+
+
+def pick_prefix_html(year: str, total_prefixes: int) -> str:
+    return (
+        f"<b>Шаг 2 из 3: выбери поток</b> <i>({year} год, {total_prefixes} вариантов)</i>\n\n"
+        "<i>Например: СЖ, ПГС и т.д.</i>"
+    )
+
+
+def pick_group_html(year: str, prefix: str, total_groups: int) -> str:
+    return (
+        f"<b>Шаг 3 из 3: выбери группу</b> <i>({year} {prefix}, {total_groups} вариантов)</i>\n\n"
+        "<i>После выбора сразу откроются кнопки расписания.</i>"
     )
 
 
@@ -131,6 +159,8 @@ BTN_TODAY = "Сегодня"
 BTN_TOMORROW = "Завтра"
 BTN_MENU = "Меню"
 BTN_CHANGE_GROUP = "Сменить группу"
+BTN_TO_SCHEDULE = "К расписанию"
+BTN_SUPPORT = "Поддержка"
 BTN_HELP = "Помощь"
 BTN_RELOAD = "Обновить кэш"
 BTN_BACK_HOME = "К расписанию"
