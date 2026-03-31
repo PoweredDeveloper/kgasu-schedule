@@ -146,5 +146,43 @@ def test_build_week_txt_has_separators_and_spacing() -> None:
         {"time": "11:20-12:50", "subject": "Физика"},
     ]
     txt = schedule_service._build_week_txt(full, date(2024, 1, 8))
-    assert "Понедельник\n\n9:40-11:10 Математика\n\n11:20-12:50 Физика" in txt
+    assert "Понедельник\n\n9:40-11:10 - Математика\n\n11:20-12:50 - Физика" in txt
     assert "--------------------" in txt
+
+
+def test_teachers_blob_one_two_three() -> None:
+    assert (
+        schedule_service.format_teachers_blob_display("доц. Иванов И.И.")
+        == "доц. Иванов И.И."
+    )
+    two = "доц. Иванов И.И., доц. Петров П.П."
+    assert schedule_service.format_teachers_blob_display(two) == two
+    three = "доц. А А., доц. Б Б., преп. В В."
+    assert schedule_service.format_teachers_blob_display(three) == "доц. А А., доц. Б Б. и др."
+
+
+def test_format_lesson_html_splits_course_and_teachers() -> None:
+    line = schedule_service.format_lesson_line_html(
+        {
+            "time": "8:00-9:30",
+            "subject": "Химия (Лабораторные) доц. Сидоров С.С.",
+            "room": "",
+            "teacher": "",
+        }
+    )
+    assert "Химия (Лабораторные)" in line
+    assert "Сидоров" in line
+    assert "доц." in line
+
+
+def test_week_txt_includes_indented_teachers() -> None:
+    full = {d: [] for d in schedule_service.WEEKDAYS}
+    full["Wednesday"] = [
+        {
+            "time": "8:00-9:30",
+            "subject": "Химия (Лабораторные) доц. Иванов И.И.",
+        },
+    ]
+    txt = schedule_service._build_week_txt(full, date(2024, 1, 8))
+    assert "8:00-9:30 - Химия (Лабораторные)" in txt
+    assert "    доц. Иванов И.И." in txt

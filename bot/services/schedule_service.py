@@ -60,7 +60,55 @@ def display_subject(subject: str) -> str:
 
 
 def _lesson_subject_for_display(les: dict) -> str:
-    return display_subject((les.get("subject") or "").strip())
+    return lesson_course_and_teachers_blob(les)[0]
+
+
+def lesson_course_and_teachers_blob(les: dict) -> tuple[str, str]:
+    """Course title vs inline teacher list from subject cell (PE: teachers hidden)."""
+    raw = (les.get("subject") or "").strip()
+    if not raw:
+        return "", ""
+    if _is_pe_or_sport_subject(raw):
+        return display_subject(raw), ""
+    m = _RE_INLINE_TEACHER_START.search(raw)
+    if not m:
+        return raw, ""
+    course = raw[: m.start()].rstrip(" ,-–—")
+    blob = raw[m.start() :].lstrip(" ,-–—")
+    return course, blob
+
+
+def split_teacher_entries(blob: str) -> list[str]:
+    """Split «доц. …, ст. преп. …» tail into separate entries."""
+    b = (blob or "").strip()
+    if not b:
+        return []
+    title = r"(?:ст\.\s*преп\.|ст\.преп\.|доц\.|проф\.|преп\.|ассист\.)"
+    pat = re.compile(title + r"\s+.+?(?=(?:\s*,\s*|\s+)" + title + r"|\Z)", re.UNICODE | re.DOTALL)
+    entries = [m.group(0).strip() for m in pat.finditer(b)]
+    return entries if entries else [b]
+
+
+def format_teachers_blob_display(blob: str) -> str:
+    """Show one or two professors in full; skip listing three or more (collapse to «и др.»)."""
+    entries = split_teacher_entries(blob)
+    if not entries:
+        return ""
+    if len(entries) == 1:
+        return entries[0]
+    if len(entries) == 2:
+        return f"{entries[0]}, {entries[1]}"
+    return f"{entries[0]}, {entries[1]} и др."
+
+
+def lesson_teacher_line_for_display(les: dict) -> str:
+    """Text for teacher line: inline blob (collapsed) or legacy teacher field."""
+    _, blob = lesson_course_and_teachers_blob(les)
+    out = format_teachers_blob_display(blob)
+    if out:
+        return out
+    legacy = (les.get("teacher") or "").strip()
+    return legacy
 
 # Latin keys that students often type instead of identical-looking Cyrillic letters.
 _LOOKALIKE = str.maketrans(
@@ -361,8 +409,19 @@ def _build_week_txt(full: dict[str, list[dict]], ref: date) -> str:
         else:
             for j, les in enumerate(lessons):
                 t = (les.get("time") or "").strip()
-                subj = _lesson_subject_for_display(les)
-                lines.append(f"{t} {subj}".strip() if t else subj)
+                course, blob = lesson_course_and_teachers_blob(les)
+                teach = format_teachers_blob_display(blob)
+                if not teach:
+                    teach = (les.get("teacher") or "").strip()
+                if t and course:
+                    main = f"{t} - {course}"
+                elif course:
+                    main = course
+                else:
+                    main = "-"
+                lines.append(main)
+                if teach:
+                    lines.append(f"    {teach}")
                 if j < len(lessons) - 1:
                     lines.append("")
         lines.append("")
@@ -376,7 +435,7 @@ def format_lesson_line_html(les: dict) -> str:
     t = esc_html((les.get("time") or "").strip())
     subj = esc_html(_lesson_subject_for_display(les))
     room = esc_html((les.get("room") or "").strip())
-    teacher_raw = (les.get("teacher") or "").strip()
+    teacher_raw = lesson_teacher_line_for_display(les)
     if _is_pe_or_sport_subject((les.get("subject") or "").strip()):
         teacher_raw = ""
     teacher = esc_html(teacher_raw)
